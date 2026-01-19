@@ -11,3 +11,47 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+img.productImg {
+  max-width: 50%;
+  height: auto;
+}
+
+img.productImgThumb {
+  max-width: 100px;
+  height: auto;
+}
+
+.hidden {
+  display: block;
+}
+
+/* Centered text in JerseyContainer*/
+.centered {
+  /* position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%); */
+  /* display: flex;
+  justify-content: center;
+  align-items: center; */
+  width: 100%;
+  height: auto;
+  position: absolute;
+  top: 15%;
+  left: 0%;
+
+}
+
+.center{
+  margin-left: auto;
+  margin-right: auto;
+}
+
+table.CartItem {
+  width: 100%;
+}
+
+input.SmallTextInput {
+  width: 20px; /*3vw*/
+}
