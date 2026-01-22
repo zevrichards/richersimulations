@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { Link, useHistory } from "react-router-dom";
 import { registerWithEmailAndPassword, signInWithGoogle} from '../service/auth'
-import { auth, auth2 } from '../config/config.js'
+import { auth, firebase } from '../config/config.js'
 
 export const Register = (props) => {
   const [email, setEmail] = useState("");
@@ -27,7 +27,7 @@ export const Register = (props) => {
         else {
           if (user) { //already signed in anonymously
             //new users will have the anonymous login linked to a new registration
-            const credential = auth2.EmailAuthProvider.credential(email, password);
+            const credential = firebase.auth.EmailAuthProvider.credential(email, password);
             auth.currentUser.linkWithCredential(credential)
             history.replace("/");
           }

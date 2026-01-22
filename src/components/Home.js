@@ -81,21 +81,8 @@ class Home extends React.Component {
         // const ItemImg = doc.data().ItemImg;
 
         // console.log(item)
-
-        firestore.collection('Users').doc(uid).set({
-          UID: uid
-        }).then(
-          firestore.collection('Users').doc(uid).collection('Cart').doc(Item.Name).set(Item
-          //   {            
-          //   Name: ItemName,
-          //   Quantity: 1,
-          //   Price: doc.data().Price,  
-          //   ItemImg: doc.data().ItemImg,
-          //   URL: doc.data().URL
-          // }
-          ) 
-        )
-      }
+        firestore.collection('Users').doc(uid).collection('Cart').doc(Item.Name).set(Item) 
+    }
     
   }
 

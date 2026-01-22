@@ -1,6 +1,4 @@
-import { GoogleAuthProvider, getRedirectResult, FacebookAuthProvider } from 'firebase/auth';
-import {firestore, auth, auth2} from '../config/config.js';
-import { googleProvider } from './authMethods.js';
+import {firestore, auth } from '../config/config.js';
 
 
 ///LINKING IS NOT WORKING. IF USER IS SIGNED IN ANONYMOUSLY THEN WE MUST CHECK TO SEE IF THE CREDENTIALS ALREADY EXIST

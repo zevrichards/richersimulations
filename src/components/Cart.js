@@ -1,7 +1,7 @@
 import React from 'react'
 import {BrowserRouter, Switch, Route, Link} from 'react-router-dom'
 
-import {firestore, Timestamp} from '../config/config.js'
+import {firestore, Timestamp, auth} from '../config/config.js'
 
 import {CartItem} from './CartItem.js'
 import PayPal from './PayPal.js'
@@ -11,6 +11,7 @@ import { MdRemoveShoppingCart, MdTungsten } from "react-icons/md"
 import { RiContactsBookLine, RiEmotionSadLine } from "react-icons/ri"
 import {RiDeleteBin5Line} from 'react-icons/ri'
 import { FaPaypal, FaCcVisa, FaCcMastercard } from 'react-icons/fa'
+import { IoCartOutline } from "react-icons/io5"
 
 export class Cart extends React.Component {
   constructor(props) {
@@ -27,19 +28,20 @@ export class Cart extends React.Component {
       DiscountPrice: 0,
       uid: '',
       // DiscountQuantity: 1,
-      processing:false,}; 
-    this.GetCart = this.GetCart.bind(this);
-    this.UpdateOrders = this.UpdateOrders.bind(this);
-    this.temp_CartToOrders = this.temp_CartToOrders.bind(this);
-    this.UpdatePromoCodeStock = this.UpdatePromoCodeStock.bind(this);    
+      orderNumber: '',
+      processing: false,
+      pendingOrders: false,
+    }; 
+    this.GetCart = this.GetCart.bind(this);    
+    this.GetPendingOrders = this.GetPendingOrders.bind(this);
+    this.handlePayPalOrderApprove = this.handlePayPalOrderApprove.bind(this);
+    this.handleRemoveFromCart = this.handleRemoveFromCart.bind(this);
+    this.handleSendToPaymentPlatform = this.handleSendToPaymentPlatform.bind(this);
+    this.handleSendToPayPal = this.handleSendToPayPal.bind(this);
+    this.createPendingOrder = this.createPendingOrder.bind(this);    
     this.EmptyCart = this.EmptyCart.bind(this);
-    this.handleOrderApprove = this.handleOrderApprove.bind(this);
     this.CustomizeState = this.CustomizeState.bind(this);
-    this.handleReceivePayment = this.handleReceivePayment.bind(this);
     this.SetCustomerData = this.SetCustomerData.bind(this);
-    //FOR TEMPORARY USE ONLY. REMOVE BEFORE BUILD ///////////////////////////////////////////////////////////
-    // this.handleTestOrderApprove = this.handleTestOrderApprove.bind(this);        
-    //FOR TEMPORARY USE ONLY. REMOVE BEFORE BUILD ///////////////////////////////////////////////////////////
     this.CheckPromoCode = this.CheckPromoCode.bind(this);
     }
 
@@ -48,7 +50,8 @@ export class Cart extends React.Component {
           ///get the cart and check for previously saved user data to set the customer data fields
           if (this.props.user)
           {
-              await this.GetCart(this.props.user.uid);  
+              await this.GetCart(this.props.user.uid); 
+              await this.GetPendingOrders();  
               await this.CustomizeState(); 
           }           
       }
@@ -59,7 +62,7 @@ export class Cart extends React.Component {
       ///get the cart
       if (this.props.user)
       {
-          await this.GetCart(this.props.user.uid);  
+          await this.GetCart(this.props.user.uid); 
       }
   }
 
@@ -80,152 +83,19 @@ export class Cart extends React.Component {
     this.setState({Items: Items}); //ARRAY DOUBLES HERE?!?
     this.setState({TotalPrice: (TotalPrice).toFixed(2)})
   }
-
-  async temp_CartToOrders() {
-    console.log('Pushing Cart to Orders');
-    const time = Timestamp.now().seconds.toString();
-    const CustomerName= this.state.CustomerName;
-    const TotalPrice = this.state.TotalPrice;
-    const PromoCodeDesc = this.state.DiscountDescription;        
-    const PromoCode = this.state.PromoCode;
-
-    var ItemsArray= [];
-
-    //retrieve the cart
-    const Cart = await firestore.collection('Users').doc(this.state.uid).collection('Cart').get()
-
-
-    //create a new order document with the TimeStamp as the order number
-    await firestore.collection('Users').doc(this.state.uid).collection('Orders').doc(time).set({ 
-        OrderNumber: time,
-        PromoCode: PromoCode})
-
-        //for every item in the cart
-        for (var doc of Cart.docs){
-            //then push the item to the order list
-            ItemsArray.push({text: doc.data().Name,
-                        image: doc.data().ItemImg,
-                        // quantity: 1,
-                        price: '$'+(doc.data().Price*(1-doc.data().Discount)).toFixed(2),
-                        URL: doc.data().URL
-                    })
-        }
-        
-        //if any promocodes were used, push it to the order list
-        if (PromoCodeDesc != '') {
-            ItemsArray.push({text: PromoCodeDesc,
-                            price: '$'+(this.state.DiscountPrice).toFixed(2)})     
-        }
-
-    //copy the itemsarray to the customers orders collection
-    firestore.collection('Users').doc(this.state.uid).collection('Orders').doc(time).collection('Items').doc(doc.data().Name).set({...doc.data()});   
-    
-    //add the filename IDs to the customers FileIDs array to grant them the necessary permissions to the repository
-    const FileIDs = []
-    //get any file Ids already present so we can add to it
-    if (firestore.collection('Users').doc(this.state.uid).FieldIDs != undefined) {
-      FileIDs = firestore.collection('Users').doc(this.state.uid).data().FieldIDs
-    }
-    // FileIDs = [...firestore.collection('Users').doc(this.props.user.uid).data().FieldIDs]
-
-    for (var item of ItemsArray){
-      //the File ID lies between the last forweard slash ('%2F') and the beginning of the beginning of the access token/metadata ('?alt'). Also replace format to bring back spaces ('%20')
-      FileIDs.push(item.URL.split('%2F').pop().split('?alt')[0].replaceAll('%20', ' '));
-           }
-    firestore.collection('Users').doc(this.state.uid).update({FileIDs: FileIDs}) 
-
-  }
   
-  async UpdateOrders() {
-      console.log('Updating Orders');
-      const time = Timestamp.now().seconds.toString();
-      const CustomerName= this.state.CustomerName;
-      const TotalPrice = this.state.TotalPrice;
-      const PromoCodeDesc = this.state.DiscountDescription;        
-      const PromoCode = this.state.PromoCode;
 
-      var ItemsArray= [];
+  async GetPendingOrders(){
 
-      
-      //make sure the user email has been set correctly. we set it here again as there seems to be some conflict with the initialization of State
-      if (this.props.user) {
-          if ((this.props.user.email) && (this.props.user.email != 'richersimulations@gmail.com')) {
-              this.setState({Email: this.props.user.email})                
-              // console.log('email: ',this.props.user.email,',',this.state.Email)
-          }
-      }
+    if (!this.props.user) return;
 
-      //console.log (Deliver, CustomerName, DeliveryAddress1, DeliveryAddress2, DeliveryCity, DeliveryTelNumber);
+    // check to see if any pending orders exist
+    const pendingOrdersQuerySnapshot = await firestore.collection("Users").doc(this.props.user.uid).collection("Orders").where("status", "==", "Payment Pending").get();
 
-      //retrieve the cart
-      const Cart = await firestore.collection('Users').doc(this.props.user.uid).collection('Cart').get()
+    // console.log("Pending Orders:", !pendingOrdersQuerySnapshot.empty)
 
+    this.setState({pendingOrders: !pendingOrdersQuerySnapshot.empty});
 
-      //create a new order document with the TimeStamp as the order number
-      await firestore.collection('Users').doc(this.props.user.uid).collection('Orders').doc(time).set({ 
-          OrderNumber: time,
-          PromoCode: PromoCode})
-
-          //for every item in the cart
-          for (var doc of Cart.docs){
-              //then push the item to the order list
-              ItemsArray.push({text: doc.data().Name,
-                          image: doc.data().ItemImg,
-                          // quantity: 1,
-                          price: '$'+(doc.data().Price*(1-doc.data().Discount)).toFixed(2),
-                          URL: doc.data().URL
-                      })
-          }
-          
-          //if any promocodes were used, push it to the order list
-          if (PromoCodeDesc != '') {
-              ItemsArray.push({text: PromoCodeDesc,
-                              price: '$'+(this.state.DiscountPrice).toFixed(2)})     
-          }
-
-      //copy the itemsarray to the customers orders collection
-      firestore.collection('Users').doc(this.props.user.uid).collection('Orders').doc(time).collection('Items').doc(doc.data().Name).set({...doc.data()});   
-      
-      //add the filename IDs to the customers FileIDs array to grant them the necessary permissions to the repository
-      const FileIDs = []
-      //get any file Ids already present so we can add to it
-      if (firestore.collection('Users').doc(this.props.user.uid).FieldIDs != undefined) {
-        FileIDs = firestore.collection('Users').doc(this.props.user.uid).data().FieldIDs
-      }
-      // FileIDs = [...firestore.collection('Users').doc(this.props.user.uid).data().FieldIDs]
-
-      for (var item of ItemsArray){
-        //the File ID lies between the last forweard slash ('%2F') and the beginning of the beginning of the access token/metadata ('?alt'). Also replace format to bring back spaces ('%20')
-        FileIDs.push(item.URL.split('%2F').pop().split('?alt')[0].replaceAll('%20', ' '));
-             }
-      firestore.collection('Users').doc(this.props.user.uid).update({FileIDs: FileIDs}) 
-          
-      
-      
-      //SEND EMAILS
-      //queue the mail to mail collection
-      console.log(this.state.CustomerName)
-      firestore.collection('mail').add({
-          to: this.state.Email,
-          cc: 'richersimulations@gmail.com',
-          template: {
-              name: 'receipt',
-              data: {
-                  ordernumber: time,
-                  total: TotalPrice,
-                  items: ItemsArray,
-                  receipt: true,
-                  name: CustomerName,
-                  }
-              }
-          }).then(() => console.log('Queued email for delivery!'));                
-  }
-
-  async handleRemoveFromCart(product){
-      await firestore.collection('Users').doc(this.props.user.uid).collection('Cart').doc(product.Name).delete().then(async () => {
-          await this.GetCart(this.props.user.uid);
-          })
-  // this.BOGOHO()      
   }
 
   async EmptyCart() {
@@ -244,22 +114,31 @@ export class Cart extends React.Component {
       }
   }
 
-  async handleOrderApprove(){
-      console.log('Order approved');
-      await this.UpdateOrders();                   
-      await this.UpdatePromoCodeStock();
-      await this.EmptyCart();      
-      alert('Order confirmed. Thank you for your purchase! Your receipt has been sent to: '+this.state.Email);
-      this.setState({checkout: false, Items:[], TotalPrice:0, processing:false,});
-  }
+async handleManualOrderApprove(){
+  
+  const token = await auth.currentUser.getIdToken();
 
-  async handleTestOrderApprove(){
-      await this.UpdateOrders();             
-      // await this.UpdatePromoCodeStock();
-      // await this.EmptyCart();        
-      alert('Order confirmed. Thank you for your purchase! Your receipt has been sent to: '+this.state.Email);
-      this.setState({checkout: false, Items:[], TotalPrice:0, processing:false,});
-  }
+  //POST to ManualOrderComplete cloud function which will handle the update of orders
+  await fetch("https://manualordercomplete-lzd77xsmjq-uc.a.run.app", {
+  method: "POST",
+  headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+  },
+  body: JSON.stringify( this.state.orderNumber, this.state.TotalPrice ),
+  }).then(
+      this.setState({checkout: false, Items:[], TotalPrice:0, })
+      
+  );
+
+  alert('Order confirmed. Thank you for your purchase! Your receipt has been sent to: '+this.state.Email);
+}
+
+async handlePayPalOrderApprove(){
+    //the PayPal webhook will call the cloud function to update orders on the back end when the transaction is succesful
+    //route to Orders page here:
+    window.location.href = "https://richersimulations.com/orders"
+}
 
   async ValidateCustomerData() {
     var result = true;
@@ -270,7 +149,7 @@ export class Cart extends React.Component {
         console.log('Invalid Name');                
     }
     if (this.props.user.isAnonymous || this.props.user.email == 'richersimulations@gmail.com') {
-        if (this.state.Email=='') {
+        if (this.state.Email==undefined) {
             alert('Please enter a email for your receipt')
             result = false;
             // console.log('Invalid Email');  
@@ -291,17 +170,144 @@ export class Cart extends React.Component {
     
   }
 
-  async handleReceivePayment() {
+  // async handleReceivePayment() {
     
-    await this.ValidateCustomerData().then(
-      //ensure that the enterred data is valid before taking customer to payment link      
-      (result) => {
+  //   await this.ValidateCustomerData().then(
+  //     //ensure that the enterred data is valid before taking customer to payment link      
+  //     (result) => {
+  //       if (result) {
+  //         alert('IMPORTANT! Click on the RETURN button after your transaction is complete to receive an order confirmation!')
+  //         //set the customer data, this may have changed from what was previously enterred. If this is brand new info it will be needed for when the payment button returns us to this page for order confirmation
+  //         this.SetCustomerData().then(
+  //           () => window.location.href = 'https://www.fygaro.com/en/pb/f70be460-0194-4362-bbb3-3ff31facbdc6/?amount='+this.state.TotalPrice
+  //         )
+  //       }  
+  //     }
+  //     )      
+  // }
+
+  async createPendingOrder() {
+
+    //Order Number created here
+    const orderNumber = Timestamp.now().seconds.toString();
+    this.setState({orderNumber: orderNumber});
+
+   
+    //create a pending order for later reference. this will be deleted later when the order is completed.
+    await firestore
+        .collection("PendingOrders")
+        .doc(orderNumber)
+        .set({                                
+            status: "Payment Pending",
+            createdAt:  new Date(),
+            orderNumber: orderNumber,
+            amount: Number(this.state.TotalPrice),
+            userId: this.props.user.uid,
+            email: this.state.Email,   
+            PromoCode: this.state.PromoCode || null,
+        });
+
+    // 🧾 Create pending order in user's orders colletions. this will contain all the items. later we will change "pending" to "paid" or delete it if the user cancels it.
+    const pendingOrderRef = firestore
+        .collection("Users")
+        .doc(this.props.user.uid)
+        .collection("Orders")
+        .doc(orderNumber)
+
+    //set data from userref here
+
+    // console.log(pendingOrder)
+    // console.log(userSnap.data())
+    await pendingOrderRef.set({
+        status: "Payment Pending",
+        createdAt:  new Date(),
+        orderNumber: orderNumber,            
+        amount: Number(this.state.TotalPrice),
+        // userId: this.props.user.uid,
+        // email: this.state.Email,    
+        PromoCode: this.state.PromoCode || null,
+    });
+
+    // 📦 Copy cart items + empty cart
+    const cartRef = firestore
+        .collection("Users")
+        .doc(this.props.user.uid)
+        .collection("Cart")
+
+    const cartSnap = await cartRef.get();
+
+    const batch = firestore.batch();
+    // console.log(this.props.user.uid, cartSnap.length)
+    for (const doc of cartSnap.docs) {        
+        //copy from cart to pending order
+        const orderItemRef = pendingOrderRef
+            .collection("Items")
+            .doc(doc.id);
+        batch.set(orderItemRef, doc.data())
+        //delete from cart
+        batch.delete(doc.ref)
+    }
+
+    batch.commit();
+    
+}
+
+async handleSendToPayPal() {
+
+    await this.createPendingOrder();
+
+    this.ValidateCustomerData().then((result) => {
+        //ensure that the enterred data is valid before taking customer to payment link            
         if (result) {
-          alert('IMPORTANT! Click on the RETURN button after your transaction is complete to receive an order confirmation!')
-          //set the customer data, this may have changed from what was previously enterred. If this is brand new info it will be needed for when the payment button returns us to this page for order confirmation
-          this.SetCustomerData().then(
-            () => window.location.href = 'https://www.fygaro.com/en/pb/f70be460-0194-4362-bbb3-3ff31facbdc6/?amount='+this.state.TotalPrice
-          )
+            //set the customer data, this may have changed from what was previously enterred. If this is brand new info it will be needed for when the payment button returns us to this page for order confirmation
+            this.SetCustomerData().then(async () => { 
+                //ensure that the enterred data is valid before taking customer to payment link
+                this.setState({checkout: result})
+            })          
+        }
+    })        
+}
+
+async handleSendToPaymentPlatform() { 
+    
+    const orderNumber = this.state.orderNumber;  
+    this.setState({processing: true})
+
+    async function createJWT(amount, orderNumber) {
+        const response = await fetch(
+            "https://createfygarojwt-lzd77xsmjq-uc.a.run.app",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    amount: amount,
+                    orderNumber: orderNumber,
+                    // amount: 1,
+                    // orderNumber: 'TEST_ORDER',
+                  })
+            }
+        );
+    
+        const data = await response.json();
+        return data.token;
+    }       
+
+
+    this.ValidateCustomerData().then(
+      //ensure that the enterred data is valid before taking customer to payment link
+      async (result) => {
+        if (result) {
+            
+            this.setState({processing: true});
+            await this.createPendingOrder();
+           //set the customer data, this may have changed from what was previously enterred. If this is brand new info it will be needed for when the payment button returns us to this page for order confirmation
+            this.SetCustomerData().then(async () => {                    
+                    const token = await createJWT(
+                        this.state.TotalPrice, orderNumber);
+                    
+                    window.location.href = "https://www.fygaro.com/en/pb/f70be460-0194-4362-bbb3-3ff31facbdc6/?jwt=" + token
+                }
+            )
         }  
       }
       )      
@@ -311,7 +317,8 @@ export class Cart extends React.Component {
     // console.log(this.props.user.uid)
     await firestore.collection('Users').doc(this.props.user.uid).update({
       name: this.state.CustomerName,
-      // email: this.state.Email,
+      email: this.state.Email,
+      uid: this.props.user.uid,
     })
   }
 
@@ -324,7 +331,7 @@ export class Cart extends React.Component {
       snapshot => {
           const user = snapshot.data();
           // console.log(user)  
-          this.setState({CustomerName: user.name, Email: user.email, ConfirmEmail: user.email})
+          this.setState({CustomerName: user.name, Email: this.props.user.email, ConfirmEmail: this.props.user.email})
     } 
     )
 
@@ -377,19 +384,32 @@ CheckPromoCode () {
 
 }
 
-async UpdatePromoCodeStock() {
-  //THIS IS HAPPENING TOO FAST WHEN MULTIPLE ITEMS ARE ORDERED
+// async UpdatePromoCodeStock() {
+//   //THIS IS HAPPENING TOO FAST WHEN MULTIPLE ITEMS ARE ORDERED
   
-  console.log('Updating promo codes')
-  if (this.state.PromoCodeApplied)  {
-    await firestore.collection('PromoCodes').doc(this.state.PromoCode).get().then( 
-        async snapshot => {
-            const doc = snapshot.data();
-            var Quantity = doc.Quantity;
-            Quantity = Quantity - 1;
-            await firestore.collection('PromoCodes').doc(this.state.PromoCode).update({'Quantity': Quantity});
-        })    
-  }
+//   console.log('Updating promo codes')
+//   if (this.state.PromoCodeApplied)  {
+//     await firestore.collection('PromoCodes').doc(this.state.PromoCode).get().then( 
+//         async snapshot => {
+//             const doc = snapshot.data();
+//             var Quantity = doc.Quantity;
+//             Quantity = Quantity - 1;
+//             await firestore.collection('PromoCodes').doc(this.state.PromoCode).update({'Quantity': Quantity});
+//         })    
+//   }
+// }
+
+async handleRemoveFromCart(item) {
+  
+  firestore
+      .collection("Users")
+      .doc(this.props.user.uid)
+      .collection("Cart")
+      .doc(item.Name)
+      .delete()
+
+  this.setState({Items:  [...this.state.Items.filter(itemJersey => itemJersey != item)]})
+  // console.log(item.League+item.Team+item.Cut+item.Sleeve+item.Variant+item.Size);
 }
 
 
@@ -398,7 +418,13 @@ async UpdatePromoCodeStock() {
 
     return ( 
       <> 
-      <div>
+      <div>        
+            { (this.state.pendingOrders) &&
+                <>
+                    <a className="w3-button w3-blue" href='/orders'>You have unfinished orders.<br/>Complete them here. <IoCartOutline/></a>
+                    <br/><br/> 
+                </>  
+                }
             { 
             (this.state.Items.length === 0) ? (
                 <a href='/' className="w3-button w3-black">Your cart is empty. <RiEmotionSadLine/>  Let's fill it up.</a>
@@ -514,60 +540,23 @@ async UpdatePromoCodeStock() {
           
             <div>
             <br/>
-            <button
+                                
+
+            {/* <button
               className="w3-button w3-black"
               disabled={this.state.processing}
               onClick={async () => {
                 if (!this.state.processing) {                    
                   if (await this.ValidateCustomerData() == true) { 
                     this.setState({processing: true})
-                    this.handleTestOrderApprove()		
-                  }					
-                }
-                }}
-              >
-                {this.state.processing ? 'Processing Order...' : 'TEST'}
-            <br/> US${this.state.TotalPrice}
-            </button>
-            &nbsp;&nbsp;
-
-            <label>UID: </label>
-            <input className="w3-input w3-border w3-grey" type='text' onChange={(e) => this.setState({uid: e.target.value})} value={this.state.uid}/>
-
-            <button
-              className="w3-button w3-black"
-              disabled={this.state.processing}
-              onClick={async () => {this.GetCart(this.state.uid)}	}
-              >
-                 GET CART
-            </button>  
-
-            <button
-              className="w3-button w3-black"
-              disabled={this.state.processing}
-              onClick={async () => {
-                    this.temp_CartToOrders()	
-                  }		
-                }			
-              >
-                CART TO ORDERS
-            </button>          
-
-            <button
-              className="w3-button w3-black"
-              disabled={this.state.processing}
-              onClick={async () => {
-                if (!this.state.processing) {                    
-                  if (await this.ValidateCustomerData() == true) { 
-                    this.setState({processing: true})
-                    this.handleOrderApprove()
+                    this.handleManualOrderApprove()
                   }					
                 }
                 }}
               >
                 {this.state.processing ? 'Processing Order...' : 'ORDER'}
             <br/> US${this.state.TotalPrice}
-            </button>
+            </button> */}
 
             </div >
           }
@@ -586,9 +575,15 @@ async UpdatePromoCodeStock() {
                           <>                          
                             <button
                               className="w3-button w3-black"
-                              onClick={() => this.handleReceivePayment()}                          
+                              onClick={() => this.handleSendToPaymentPlatform()}                          
                               >
-                                <FaCcMastercard/> <FaCcVisa/> <br/> Debit Card/Credit Card  <br/> US${this.state.TotalPrice}
+                                {this.state.processing ?
+                                  'Processing...'
+                                  :
+                                  <>
+                                  <FaCcMastercard/> <FaCcVisa/> <br/> Debit Card/Credit Card  <br/> US${this.state.TotalPrice}
+                                  </>
+                                }
                             </button>
                             &nbsp;&nbsp;
 
@@ -596,7 +591,7 @@ async UpdatePromoCodeStock() {
                                                                             if (!this.state.processing) {                    
                                                                               if (await this.ValidateCustomerData() == true) { 
                                                                                 this.setState({processing: true})
-                                                                                this.handleOrderApprove()		
+                                                                                this.handleSendToPayPal()	
                                                                               }					
                                                                             }
                                                                             }} >

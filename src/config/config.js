@@ -26,9 +26,8 @@ const app = firebase.initializeApp(firebaseConfig);
 // const analytics = getAnalytics(app);
 
 const auth = firebase.auth();
-const auth2 = firebase.auth;
 const firestore = firebase.firestore();
 const storage = firebase.storage();
 const Timestamp = firebase.firestore.Timestamp;
 
-export {firebase, auth, auth2, firestore, storage, app, Timestamp}//analytics
+export {firebase, auth, firestore, storage, app, Timestamp}//analytics
