@@ -136,7 +136,7 @@ async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
         .split("?alt")[0]
         .replaceAll("%20", " "),
   );
-  
+
   batch.update(userRef, {
     FileIDs: admin.firestore.FieldValue.arrayUnion(...newIDs),
   });
