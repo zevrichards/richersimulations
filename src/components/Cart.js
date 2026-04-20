@@ -207,7 +207,7 @@ async handlePayPalOrderApprove(){
             PromoCode: this.state.PromoCode || null,
         });
 
-    // 🧾 Create pending order in user's orders colletions. this will contain all the items. later we will change "pending" to "paid" or delete it if the user cancels it.
+    // 🧾 Create pending order in user's orders colletions. this will contain all the items. later we will change "pending" to "paid" or "cancelled"
     const pendingOrderRef = firestore
         .collection("Users")
         .doc(this.props.user.uid)

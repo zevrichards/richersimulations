@@ -109,7 +109,8 @@ async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
       // We genuinely can't reach the customer. Surface this loudly so
       // the payment provider retries and/or an alert fires.
       throw new Error(
-          `Cannot fulfill ${orderNumber}: no user doc, no email on PendingOrders.`,
+          `Cannot fulfill ${orderNumber}: no user doc,
+           no email on PendingOrders.`,
       );
     }
     await userRef.set({

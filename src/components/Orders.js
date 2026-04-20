@@ -153,6 +153,22 @@ export class Orders extends React.Component {
     }));
   
     try {
+      // Guard: only let the user cancel if it's still pending AND recent.
+      // Read-before-write; don't let a stale tab trigger a cancel on an
+      // order the webhook is about to fulfill.
+      const pendingRef = firestore.collection("PendingOrders").doc(orderNumber);
+      const pendingSnap = await pendingRef.get();
+
+      if (!pendingSnap.exists) {
+        console.warn("Cancel: PendingOrder already gone", orderNumber);
+        return;
+      }
+      const pendingData = pendingSnap.data();
+      if (pendingData.status !== "Payment Pending") {
+        console.warn("Cancel: order no longer pending", pendingData.status);
+        return;
+      }
+      
       await firestore
         .collection("Users")
         .doc(this.props.user.uid)
@@ -160,10 +176,7 @@ export class Orders extends React.Component {
         .doc(orderNumber)
         .update({status: "Cancelled"});
 
-      await firestore
-        .collection("PendingOrders")
-        .doc(orderNumber)
-        .delete();
+        await pendingRef.update({ status: "Cancelled" });  // not .delete()
     }catch (err) {
       console.error(err);
     }
