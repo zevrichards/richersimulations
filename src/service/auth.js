@@ -63,7 +63,8 @@ const logInWithEmailAndPassword = async (user, email, password) => {
       await firestore.collection('Users').doc(user.uid).set({
         UID: user.uid,
         email: email,
-      });
+      },
+      {merge: true});
     } catch (err) {
       console.error(err);
       alert(err.message);

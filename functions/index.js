@@ -39,7 +39,27 @@ const PAYPAL_WEBHOOK_ID = defineSecret("PAYPAL_WEBHOOK_ID");
 const db = admin.firestore();
 
 /**
- * Completes the order after payment is received
+ * Completes the order after payment is received.
+ *
+ * Changes vs. the previous version:
+ *  - Idempotency: if PendingOrders/{orderNumber}.status === "Completed"
+ *    we return silently. This lets the webhook handle provider retries
+ *    without double-processing.
+ *  - We no longer batch.delete the PendingOrders doc. We mark it
+ *    Completed instead. Makes idempotency possible and gives us a
+ *    permanent audit trail of every payment attempt. Clean up old
+ *    completed entries with a scheduled function if desired.
+ *  - Self-heal: if Users/{userId} doesn't exist in Firestore (e.g.
+ *    because the user came in via Google sign-in and we never wrote
+ *    their user doc), create it on the fly using data from the
+ *    PendingOrders doc and/or Firebase Auth.
+ *  - Fixed bug: promo code update was using `pendingOrderRef.PromoCode`
+ *    (a DocumentReference property that doesn't exist) instead of
+ *    `pendingOrder.PromoCode` (the actual data field).
+ *  - Removed the "user Orders empty" check, which was redundant with
+ *    the PendingOrders check we already did and would incorrectly
+ *    throw for first-time/migrated users.
+ *
  * @param {object} param0
  */
 async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
@@ -49,46 +69,75 @@ async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
   const pendingSnap = await pendingRef.get();
 
   if (!pendingSnap.exists) {
-    // logger.error("Order not found:", orderNumber);
-    // res.status(404).send("Order not found");
-    // return;
     throw new Error(`Order not found: ${orderNumber}`);
   }
 
   const pendingOrder = pendingSnap.data();
   const userId = pendingOrder.userId;
 
-  // 🔍 Resolve user
+  // 🔒 Idempotency guard: if we've already processed this order, return
+  //    cleanly so the payment provider stops retrying.
+  if (pendingOrder.status === "Completed") {
+    logger.info(
+        `Order ${orderNumber} already completed — skipping duplicate webhook.`,
+    );
+    return;
+  }
+
+  // 🔍 Resolve user. If the Firestore user doc is missing (e.g. Google
+  //    sign-in orphan — no doc was ever written), self-heal from
+  //    Firebase Auth + the email stored on the PendingOrders doc.
   const userRef = db.collection("Users").doc(userId);
-  const userSnap = await userRef.get();
-  const user = userSnap.data();
+  let userSnap = await userRef.get();
 
   if (!userSnap.exists) {
-    // logger.error("User not found:", userId);
-    // res.status(404).send("User not found");
-    // return;
-    throw new Error(`User not found: ${userId}`);
+    logger.warn(
+        `User doc missing for ${userId}; self-healing from Auth record.`,
+    );
+    let email = pendingOrder.email || null;
+    let displayName = null;
+    try {
+      const authUser = await admin.auth().getUser(userId);
+      email = email || authUser.email || null;
+      displayName = authUser.displayName || null;
+    } catch (e) {
+      logger.warn(`Auth.getUser failed for ${userId}: ${e.message}`);
+      // Even if Auth.getUser fails, we may still have the email from
+      // PendingOrders, which is enough to send the receipt.
+    }
+    if (!email) {
+      // We genuinely can't reach the customer. Surface this loudly so
+      // the payment provider retries and/or an alert fires.
+      throw new Error(
+          `Cannot fulfill ${orderNumber}: no user doc, no email on PendingOrders.`,
+      );
+    }
+    await userRef.set({
+      UID: userId,
+      email,
+      name: displayName || pendingOrder.name || "",
+      createdBy: "webhookSelfHeal",
+    }, {merge: true});
+    userSnap = await userRef.get();
   }
 
+  const user = userSnap.data();
 
-  // 🛒 Load pending user order
-  const pendingOrderSnap = await userRef.collection("Orders").get();
-
-  if (pendingOrderSnap.empty) {
-    // logger.warn("Orders empty, skipping fulfillment");
-    // res.status(404).send("User orders empty, skipping fulfillment");
-    // return;
-    throw new Error(`User orders empty, skipping fulfillment.`);
-  }
-
-  // 🧾 Update order to "Completed"
   const pendingOrderRef = userRef
       .collection("Orders")
       .doc(orderNumber);
 
+  const pendingOrderSnap = await pendingOrderRef.get();
 
-  // console.log(pendingOrder)
-  // console.log(userSnap.data())
+  if (!pendingOrderSnap.exists) {
+    // This would happen if the user's Orders sub-doc wasn't written —
+    // most likely a client-side failure during createPendingOrder.
+    throw new Error(
+        `Order sub-doc missing: Users/${userId}/Orders/${orderNumber}`,
+    );
+  }
+
+  // 🧾 Update order to "Completed"
   await pendingOrderRef.update({
     transactionId: transactionId,
     amount: Number(amount),
@@ -112,34 +161,45 @@ async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
     });
   }
 
-  // update promocode quantity if one was used
+  // update promocode quantity if one was used.
+  // NOTE: pendingOrder.PromoCode — reading from the data, not the
+  // DocumentReference (which was a bug in the previous version).
   if (pendingOrder.PromoCode) {
-    ItemsArray.push({text: pendingOrderRef.PromoCode});
+    ItemsArray.push({text: pendingOrder.PromoCode});
 
-    const promoRef = db.collection("PromoCodes")
-        .doc(pendingOrderRef.PromoCode);
+    const promoRef = db.collection("PromoCodes").doc(pendingOrder.PromoCode);
     batch.update(promoRef, {
-      Quantity: admin.firestore.FieldValue.increment(
-          -1,
-      ),
+      Quantity: admin.firestore.FieldValue.increment(-1),
     });
   }
 
-  batch.delete(pendingRef);
+  // Mark the PendingOrders doc as Completed instead of deleting it.
+  // This keeps a permanent record of every payment and — crucially —
+  // enables the idempotency guard at the top of this function to
+  // catch any retries that arrive after the batch has committed.
+  batch.update(pendingRef, {
+    status: "Completed",
+    transactionId: transactionId,
+    paymentProvider: provider,
+    paidAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
 
   // add the filename IDs to the customers FileIDs array
   //   to grant them the necessary permissions to the repository
-  const newIDs = ItemsArray.map((item) =>
-    item.URL
-        .split("%2F")
-        .pop()
-        .split("?alt")[0]
-        .replaceAll("%20", " "),
-  );
+  const newIDs = ItemsArray
+      .filter((item) => item.URL) // promo entries have no URL
+      .map((item) => item.URL
+          .split("%2F")
+          .pop()
+          .split("?alt")[0]
+          .replaceAll("%20", " "),
+      );
 
-  batch.update(userRef, {
-    FileIDs: admin.firestore.FieldValue.arrayUnion(...newIDs),
-  });
+  if (newIDs.length > 0) {
+    batch.update(userRef, {
+      FileIDs: admin.firestore.FieldValue.arrayUnion(...newIDs),
+    });
+  }
 
   // commit all changes to the database
   await batch.commit();
@@ -148,7 +208,7 @@ async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
   // SEND EMAILS
 
   // queue the mail to mail collection
-  db.collection("mail").add({
+  await db.collection("mail").add({
     to: user.email,
     cc: "richersimulations@gmail.com",
     template: {
@@ -158,10 +218,11 @@ async function fulfillOrder({orderNumber, transactionId, amount, provider}) {
         total: amount,
         items: ItemsArray,
         receipt: true,
-        name: user.name,
+        name: user.name || "",
       },
     },
-  }).then(() => console.log("Queued email for delivery!"));
+  });
+  console.log("Queued email for delivery!");
 
   logger.info("Order completed", {
     transactionId,

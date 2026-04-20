@@ -5,10 +5,10 @@ import './css/w3-custom.css';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {BrowserRouter, Switch, Route} from 'react-router-dom'
 
-import {auth} from './config/config.js' //firestore, storage, app, analytics
+import {auth, firestore} from './config/config.js' //storage, app, analytics
 //firebase config
 import firebase from 'firebase/compat/app';
 import { useAuthState } from 'react-firebase-hooks/auth'
@@ -37,6 +37,56 @@ const darkTheme = createTheme({
 function App() {
   const [user] = useAuthState(auth);
   SignInUser = SignInUser.bind(this);
+
+  // Handle anon -> Google sign-in transitions.
+  // Runs whenever the auth state changes. For any non-anonymous user:
+  //   1. Ensure a Firestore Users/{uid} doc exists (fixes the server-side
+  //      "User not found" error in the Fygaro webhook).
+  //   2. If sessionStorage.pendingAnonMerge is set (stashed in SignIn.js
+  //      when we couldn't linkWithRedirect because the Google account
+  //      already existed), migrate the cart items from the anon UID to
+  //      the now-signed-in UID, then clear the flag.
+  useEffect(() => {
+    async function handleAuthChange() {
+      if (!user || user.isAnonymous) return;
+
+      // 1. Upsert user doc (merge:true so we don't clobber name/etc).
+      try {
+        await firestore.collection('Users').doc(user.uid).set(
+          { UID: user.uid, email: user.email || null },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error('User doc upsert failed:', e);
+      }
+
+      // 2. Migrate anonymous cart if a merge is pending.
+      const anonUid = sessionStorage.getItem('pendingAnonMerge');
+      if (anonUid && anonUid !== user.uid) {
+        sessionStorage.removeItem('pendingAnonMerge');
+        try {
+          const anonCart = await firestore
+            .collection('Users').doc(anonUid).collection('Cart').get();
+          if (!anonCart.empty) {
+            const batch = firestore.batch();
+            anonCart.forEach(doc => {
+              batch.set(
+                firestore.collection('Users').doc(user.uid)
+                  .collection('Cart').doc(doc.id),
+                doc.data(),
+                { merge: true }
+              );
+              batch.delete(doc.ref);
+            });
+            await batch.commit();
+          }
+        } catch (e) {
+          console.error('Anon cart migration failed:', e);
+        }
+      }
+    }
+    handleAuthChange();
+  }, [user]);
 
   // const myProps = Object.assign({}, props);
   // delete myProps.computedMatch;

@@ -248,7 +248,14 @@ async handlePayPalOrderApprove(){
         batch.delete(doc.ref)
     }
 
-    batch.commit();
+    // await the batch commit so all items land in Firestore before we
+    // return — otherwise the user can be redirected to the payment page
+    // before their cart has finished writing to the pending order.
+    await batch.commit();
+
+    // return the orderNumber so callers don't have to rely on state,
+    // which is async and won't be updated until the next render.
+    return orderNumber;
     
 }
 
@@ -269,8 +276,7 @@ async handleSendToPayPal() {
 }
 
 async handleSendToPaymentPlatform() { 
-    
-    const orderNumber = this.state.orderNumber;  
+
     this.setState({processing: true})
 
     async function createJWT(amount, orderNumber) {
@@ -293,13 +299,19 @@ async handleSendToPaymentPlatform() {
     }       
 
 
+    // IMPORTANT: we no longer read orderNumber from this.state here.
+    // createPendingOrder() generates a fresh orderNumber every call and
+    // returns it — we use the returned value so the JWT and the
+    // PendingOrders doc always match. Relying on this.state.orderNumber
+    // was buggy because setState is async: the state read in this
+    // function was the *previous* order (or '' on first click).
     this.ValidateCustomerData().then(
       //ensure that the enterred data is valid before taking customer to payment link
       async (result) => {
         if (result) {
             
             this.setState({processing: true});
-            await this.createPendingOrder();
+            const orderNumber = await this.createPendingOrder();
            //set the customer data, this may have changed from what was previously enterred. If this is brand new info it will be needed for when the payment button returns us to this page for order confirmation
             this.SetCustomerData().then(async () => {                    
                     const token = await createJWT(
@@ -315,11 +327,12 @@ async handleSendToPaymentPlatform() {
 
   async SetCustomerData() {
     // console.log(this.props.user.uid)
-    await firestore.collection('Users').doc(this.props.user.uid).update({
+    await firestore.collection('Users').doc(this.props.user.uid).set({
       name: this.state.CustomerName,
       email: this.state.Email,
       uid: this.props.user.uid,
-    })
+    },
+    {merge:true})
   }
 
   async CustomizeState() {
