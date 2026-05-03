@@ -35,6 +35,7 @@ const FYGARO_API_KEY = defineSecret("FYGARO_API_KEY");
 const PAYPAL_CLIENT_ID = defineSecret("PAYPAL_CLIENT_ID");
 const PAYPAL_SECRET = defineSecret("PAYPAL_SECRET");
 const PAYPAL_WEBHOOK_ID = defineSecret("PAYPAL_WEBHOOK_ID");
+const ADMIN_TOKEN = defineSecret("ADMIN_TOKEN");
 
 const db = admin.firestore();
 
@@ -527,4 +528,43 @@ exports.fygaroWebhook = onRequest(
         return res.status(500).send("Server error");
       }
     },
+);
+
+exports.manualOrderComplete = onRequest(
+  {
+    secrets: [ADMIN_TOKEN],
+  },
+  async (req, res) => {
+    try {
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed");
+      }
+
+      const provided = req.headers["x-admin-token"];
+      const expected = ADMIN_TOKEN.value();
+      if (!provided || !expected || provided !== expected) {
+        logger.warn("manualOrderComplete: bad/missing admin token");
+        return res.status(401).send("Unauthorized");
+      }
+
+      const {orderNumber, transactionId, amount, provider} = req.body || {};
+      if (!orderNumber || !transactionId || amount === undefined) {
+        return res.status(400).json({
+          error: "Required: orderNumber, transactionId, amount; optional: provider",
+        });
+      }
+
+      await fulfillOrder({
+        orderNumber,
+        transactionId,
+        amount,
+        provider: provider || "Manual",
+      });
+
+      return res.status(200).json({ok: true, orderNumber});
+    } catch (err) {
+      logger.error("manualOrderComplete error", err);
+      return res.status(500).json({error: err.message || "Server error"});
+    }
+  },
 );

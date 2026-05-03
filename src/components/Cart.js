@@ -347,18 +347,6 @@ async handleSendToPaymentPlatform() {
           this.setState({CustomerName: user.name, Email: this.props.user.email, ConfirmEmail: this.props.user.email})
     } 
     )
-
-    //if we came from the Fygaro payment button, check for the return URL and process the approved payment
-    if (this.props.location.search != '') {
-      const params = new URLSearchParams(this.props.location.search);
-
-      if (params.get('handleOrderApprove')) {           
-        console.log('Return URL from Fygaro payment button') 
-        if (this.state.Items.length > 0) {
-          this.handleOrderApprove()
-        }
-      } 
-    }
   }
 
 
