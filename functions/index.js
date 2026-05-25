@@ -311,7 +311,7 @@ async function verifyPaypalWebhook(req) {
       },
   );
 
-  const {accessToken} = await tokenRes.json();
+  const {access_token} = await tokenRes.json();
 
   // 2. Verify webhook signature
   const verifyRes = await fetch(
@@ -319,7 +319,7 @@ async function verifyPaypalWebhook(req) {
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${accessToken}`,
+          "Authorization": `Bearer ${access_token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -493,7 +493,7 @@ exports.fygaroWebhook = onRequest(
           amount,
         } = payload;
 
-        const orderNumber = payload.customReference;
+        const orderNumber = payload.custom_reference;
 
         if (!transactionId) {
           logger.error("Missing transactionId");
@@ -501,8 +501,8 @@ exports.fygaroWebhook = onRequest(
         }
 
         if (!orderNumber) {
-          logger.error("Missing customReference");
-          res.status(400).send("Missing customReference");
+          logger.error("Missing custom_reference");
+          res.status(400).send("Missing custom_reference");
           return;
         }
 
@@ -531,40 +531,41 @@ exports.fygaroWebhook = onRequest(
 );
 
 exports.manualOrderComplete = onRequest(
-  {
-    secrets: [ADMIN_TOKEN],
-  },
-  async (req, res) => {
-    try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed");
-      }
+    {
+      secrets: [ADMIN_TOKEN],
+    },
+    async (req, res) => {
+      try {
+        if (req.method !== "POST") {
+          return res.status(405).send("Method Not Allowed");
+        }
 
-      const provided = req.headers["x-admin-token"];
-      const expected = ADMIN_TOKEN.value();
-      if (!provided || !expected || provided !== expected) {
-        logger.warn("manualOrderComplete: bad/missing admin token");
-        return res.status(401).send("Unauthorized");
-      }
+        const provided = req.headers["x-admin-token"];
+        const expected = ADMIN_TOKEN.value();
+        if (!provided || !expected || provided !== expected) {
+          logger.warn("manualOrderComplete: bad/missing admin token");
+          return res.status(401).send("Unauthorized");
+        }
 
-      const {orderNumber, transactionId, amount, provider} = req.body || {};
-      if (!orderNumber || !transactionId || amount === undefined) {
-        return res.status(400).json({
-          error: "Required: orderNumber, transactionId, amount; optional: provider",
+        const {orderNumber, transactionId, amount, provider} = req.body || {};
+        if (!orderNumber || !transactionId || amount === undefined) {
+          return res.status(400).json({
+            error:
+             "Required: orderNumber, transactionId, amount; optional: provider",
+          });
+        }
+
+        await fulfillOrder({
+          orderNumber,
+          transactionId,
+          amount,
+          provider: provider || "Manual",
         });
+
+        return res.status(200).json({ok: true, orderNumber});
+      } catch (err) {
+        logger.error("manualOrderComplete error", err);
+        return res.status(500).json({error: err.message || "Server error"});
       }
-
-      await fulfillOrder({
-        orderNumber,
-        transactionId,
-        amount,
-        provider: provider || "Manual",
-      });
-
-      return res.status(200).json({ok: true, orderNumber});
-    } catch (err) {
-      logger.error("manualOrderComplete error", err);
-      return res.status(500).json({error: err.message || "Server error"});
-    }
-  },
+    },
 );
