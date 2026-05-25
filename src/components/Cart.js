@@ -119,7 +119,7 @@ async handleManualOrderApprove(){
   const token = await auth.currentUser.getIdToken();
 
   //POST to ManualOrderComplete cloud function which will handle the update of orders
-  await fetch("https://manualordercomplete-lzd77xsmjq-uc.a.run.app", {
+  await fetch("https://us-central1-richersimulations-b57cb.cloudfunctions.net/manualOrderComplete", {
   method: "POST",
   headers: {
       "Authorization": `Bearer ${token}`,
@@ -281,7 +281,7 @@ async handleSendToPaymentPlatform() {
 
     async function createJWT(amount, orderNumber) {
         const response = await fetch(
-            "https://createfygarojwt-lzd77xsmjq-uc.a.run.app",
+            "https://us-central1-richersimulations-b57cb.cloudfunctions.net/createFygaroJWT",
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

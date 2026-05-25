@@ -311,7 +311,7 @@ async function verifyPaypalWebhook(req) {
       },
   );
 
-  const {access_token} = await tokenRes.json();
+  const {accessToken} = await tokenRes.json();
 
   // 2. Verify webhook signature
   const verifyRes = await fetch(
@@ -319,7 +319,7 @@ async function verifyPaypalWebhook(req) {
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${access_token}`,
+          "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

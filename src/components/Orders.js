@@ -187,7 +187,7 @@ export class Orders extends React.Component {
         
     async function createJWT(amount, orderNumber) {
         const response = await fetch(
-            "https://createfygarojwt-lzd77xsmjq-uc.a.run.app",
+            "https://us-central1-richersimulations-b57cb.cloudfunctions.net/createFygaroJWT",
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
