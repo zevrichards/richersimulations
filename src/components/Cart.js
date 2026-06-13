@@ -80,7 +80,7 @@ export class Cart extends React.Component {
         })
     }
 
-    this.setState({Items: Items}); //ARRAY DOUBLES HERE?!?
+    this.setState({Items: Items});
     this.setState({TotalPrice: (TotalPrice).toFixed(2)})
   }
   

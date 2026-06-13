@@ -75,7 +75,10 @@ export class Orders extends React.Component {
         // Wait for ALL items in this order
         const ItemsArray = await Promise.all(
           Items.docs.map(async (Itemdoc) => {
-            // find the actual current product that matcehs this item in the database so we can pull its current download URL which may have changed since the date the purchase was made
+            // The download URL stored on the order item at purchase time may
+            // become stale (e.g. if the file is updated after purchase).
+            // We always fetch the *current* URL from the Products collection
+            // so customers always get the latest version of what they bought.
             const ProductSnapshot = await firestore.collection("Products").doc(Itemdoc.id).get();
 
             const ReplacementURLdoc = ProductSnapshot.data();
@@ -128,10 +131,12 @@ export class Orders extends React.Component {
   }
 
   async CustomizeState() {
-    //THIS MAY BE BAD PRACTICE. WE ARE SETTING STATE FROM THE URL.
-    ///THEREFORE WE HAVE A DUPLICATE INSTEAD OF SINGLE SOURCE OF TRUTH
-
-    //try to load previously saved user data
+    // NOTE: this reads user data from Firestore and sets it into component
+    // state, creating a second source of truth alongside props. Called after
+    // GetOrders() in componentDidUpdate because setState inside GetOrders()
+    // alone wasn't triggering a re-render reliably — the second setState
+    // here forces one. This is a known quirk of the class component lifecycle
+    // and is a candidate for refactoring to a functional component.
     await firestore.collection('Users').doc(this.props.user.uid).get().then( 
       snapshot => {
           const user = snapshot.data();
@@ -143,7 +148,9 @@ export class Orders extends React.Component {
   }
 
   async handleCancelOrder(orderNumber) {
-
+    // Optimistic update — change the UI immediately so the user gets
+    // instant feedback, then write to Firestore. If the write fails
+    // the state will be stale until the next GetOrders() call.
     this.setState(prevState => ({
       Orders: prevState.Orders.map(order =>
         order.orderNumber === orderNumber

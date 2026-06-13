@@ -530,6 +530,18 @@ exports.fygaroWebhook = onRequest(
     },
 );
 
+/**
+ * Admin-only endpoint for manually completing an order that was paid but
+ * whose webhook was never delivered (e.g. PayPal live webhook non-delivery,
+ * or a Fygaro signature mismatch during testing).
+ *
+ * Requires the x-admin-token header to match the ADMIN_TOKEN secret.
+ *
+ * Body: { orderNumber, transactionId, amount, provider? }
+ *
+ * Calls fulfillOrder() directly — same path as a real webhook, so the
+ * idempotency guard applies and double-completion is safe to attempt.
+ */
 exports.manualOrderComplete = onRequest(
     {
       secrets: [ADMIN_TOKEN],

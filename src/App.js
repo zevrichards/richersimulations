@@ -36,7 +36,6 @@ const darkTheme = createTheme({
 
 function App() {
   const [user] = useAuthState(auth);
-  SignInUser = SignInUser.bind(this);
 
   // Handle anon -> Google sign-in transitions.
   // Runs whenever the auth state changes. For any non-anonymous user:
