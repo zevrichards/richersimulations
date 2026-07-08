@@ -261,18 +261,23 @@ async handlePayPalOrderApprove(){
 
 async handleSendToPayPal() {
 
-    await this.createPendingOrder();
+    // orderNumber is returned directly (not read from this.state) for the
+    // same reason as handleSendToPaymentPlatform below: setState is async,
+    // so a state read here could still be the previous order.
+    const orderNumber = await this.createPendingOrder();
 
     this.ValidateCustomerData().then((result) => {
-        //ensure that the enterred data is valid before taking customer to payment link            
+        //ensure that the enterred data is valid before taking customer to payment link
         if (result) {
             //set the customer data, this may have changed from what was previously enterred. If this is brand new info it will be needed for when the payment button returns us to this page for order confirmation
-            this.SetCustomerData().then(async () => { 
+            this.SetCustomerData().then(async () => {
                 //ensure that the enterred data is valid before taking customer to payment link
-                this.setState({checkout: result})
-            })          
+                this.setState({checkout: result, orderNumber: orderNumber})
+            })
+        } else {
+            this.setState({processing: false})
         }
-    })        
+    })
 }
 
 async handleSendToPaymentPlatform() { 
@@ -568,7 +573,7 @@ async handleRemoveFromCart(item) {
                   {this.state.checkout ? (
                   <>
                       <label className='notice'>Remember to change currency to USD to avoid PayPal's extra fees!</label><br/>
-                      <PayPal value={this.state.TotalPrice} OrderApproved={this.handleOrderApprove}/>
+                      <PayPal value={this.state.TotalPrice} orderNumber={this.state.orderNumber} OrderApproved={this.handlePayPalOrderApprove}/>
                   </>
                   
                   ) : (
@@ -576,7 +581,8 @@ async handleRemoveFromCart(item) {
                           <>                          
                             <button
                               className="w3-button w3-black"
-                              onClick={() => this.handleSendToPaymentPlatform()}                          
+                              disabled={this.state.processing}
+                              onClick={() => this.handleSendToPaymentPlatform()}
                               >
                                 {this.state.processing ?
                                   'Processing...'
@@ -588,15 +594,26 @@ async handleRemoveFromCart(item) {
                             </button>
                             &nbsp;&nbsp;
 
-                            <button className="w3-button w3-black" onClick={async () => {
-                                                                            if (!this.state.processing) {                    
-                                                                              if (await this.ValidateCustomerData() == true) { 
-                                                                                this.setState({processing: true})
-                                                                                this.handleSendToPayPal()	
-                                                                              }					
+                            <button className="w3-button w3-black" disabled={this.state.processing} onClick={async () => {
+                                                                            // processing is set synchronously, before any
+                                                                            // await, and the button is disabled while
+                                                                            // processing so repeated/rapid clicks can't
+                                                                            // race past this guard and create duplicate
+                                                                            // pending orders.
+                                                                            this.setState({processing: true})
+                                                                            if (await this.ValidateCustomerData() == true) {
+                                                                              this.handleSendToPayPal()
+                                                                            } else {
+                                                                              this.setState({processing: false})
                                                                             }
                                                                             }} >
-                            <FaPaypal/> <br/> Paypal<br/> US${this.state.TotalPrice}
+                            {this.state.processing ?
+                              'Processing...'
+                              :
+                              <>
+                              <FaPaypal/> <br/> Paypal<br/> US${this.state.TotalPrice}
+                              </>
+                            }
                             </button>
                             
                           </>
