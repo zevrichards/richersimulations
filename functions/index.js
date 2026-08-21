@@ -311,7 +311,7 @@ async function verifyPaypalWebhook(req) {
       },
   );
 
-  const {accessToken} = await tokenRes.json();
+  const {access_token: accessToken} = await tokenRes.json();
 
   // 2. Verify webhook signature
   const verifyRes = await fetch(
